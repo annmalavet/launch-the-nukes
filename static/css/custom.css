@@ -37,6 +37,29 @@
     background: linear-gradient(90deg, #fef2f2 0%, #ffffff 100%);
 }
 
+/* Model selection dropdown */
+.model-select {
+    width: 100%;
+    padding: 1rem;
+    font-size: 1rem;
+    color: #111827;
+    background-color: #ffffff;
+    border: 2px solid #d1d5db;
+    border-radius: 0.5rem;
+    appearance: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.model-select:hover {
+    border-color: #f87171;
+}
+
+.model-select:focus {
+    outline: none;
+    border-color: #dc2626;
+}
+
 /* Loading animation for form submission */
 .form-loading {
     pointer-events: none;

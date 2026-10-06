@@ -67,6 +67,22 @@
         </div>
 
         <form id="promptForm" method="POST" action="{{ url_for('submit') }}" class="space-y-4">
+            <div class="relative">
+                <label for="model" class="absolute -top-2.5 left-3 bg-white px-1 text-xs font-medium text-red-600 z-10">Select Model</label>
+                <select id="model" name="model" class="model-select">
+                    <option value="llama3.2">llama3.2 — Meta</option>
+                    <option value="mistral">mistral — Mistral AI</option>
+                    <option value="gemma3">gemma3 — Google</option>
+                    <option value="dolphin-mistral">dolphin-mistral — Uncensored</option>
+                    <option value="wizard-vicuna-uncensored">wizard-vicuna-uncensored — Uncensored</option>
+                    <option value="nous-hermes2">nous-hermes2 — Nous Research</option>
+                </select>
+                <div class="pointer-events-none absolute inset-y-0 right-4 flex items-center">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </div>
+            </div>
             <div>
                 <label for="prompt" class="block text-sm font-medium text-gray-700 mb-2">
                     Your Prompt
