@@ -96,6 +96,7 @@ class FirestoreJobStore:
             "result": job.result,
             "progress": job.progress,
             "progress_message": job.progress_message,
+            "model": getattr(job, "model", "llama3.2"),
         })
 
     def get_job(self, job_id: str) -> Optional[Job]:

@@ -50,6 +50,7 @@ class Job:
     progress_message: str = "Queued"
     # Storing the queue position in Redis to process on a FIFO basis
     queue_position: int = 0
+    model: str = "llama3.2"
 
     def to_dict(self):
         return {
@@ -65,7 +66,8 @@ class Job:
             'error': self.error,
             'progress': self.progress,
             'progress_message': self.progress_message,
-            'queue_position': self.queue_position
+            'queue_position': self.queue_position,
+            'model': self.model
         }
 
     """
@@ -89,7 +91,8 @@ class Job:
             error=data.get('error'),
             progress=data.get('progress', 0),
             progress_message=data.get('progress_message', 'Queued'),
-            queue_position=data.get('queue_position', 0)
+            queue_position=data.get('queue_position', 0),
+            model=data.get('model', 'llama3.2')
         )
 
 class RedisJobQueue:
@@ -106,14 +109,15 @@ class RedisJobQueue:
     """
     Adding the job to the Redis Queue
     """    
-    def add_job(self, user_id: str, username: str, prompt: str, job_id:str) -> None:
+    def add_job(self, user_id: str, username: str, prompt: str, job_id: str, model: str = "llama3.2") -> None:
         job = Job(
             job_id=job_id,
             user_id=user_id,
             username=username,
             prompt=prompt,
             status=JobStatus.PENDING,
-            created_at=datetime.now()
+            created_at=datetime.now(),
+            model=model
         )
         
         # Store job data
@@ -293,7 +297,7 @@ class LLMProcessor:
             print(f"   URL: {ollama_url}")
             return False
     
-    def process_prompt(self, job_id: str, prompt: str, job_queue, user_id: str) -> Dict[str, Any]:
+    def process_prompt(self, job_id: str, prompt: str, job_queue, user_id: str, model: str = "llama3.2") -> Dict[str, Any]:
         """Process a prompt with LLM and MCP integration"""
         try:
             # Update progress
@@ -359,7 +363,7 @@ class LLMProcessor:
             ]
             
             # Call LLM with streaming progress
-            llm = OllamaProvider(model="llama3.2")
+            llm = OllamaProvider(model=model)
             
             # Create progress callback for streaming updates
             def progress_callback(progress: int, message: str):
@@ -557,7 +561,7 @@ def worker_process(redis_url: str):
                     
                     # Process the job
                     print("user_id", user_id)
-                    result = processor.process_prompt(job_id, job.prompt, job_queue, user_id)
+                    result = processor.process_prompt(job_id, job.prompt, job_queue, user_id, job.model)
                     
                     # Update job with result
                     job_queue.update_job(

@@ -116,11 +116,12 @@ def dashboard():
 def submit():
     user_id = get_user_id()
     user_input = request.form.get('user_input', '').strip()
-    
+    model = request.form.get('model', 'llama3.2')
+
     if not user_input:
         flash('Please enter some text', 'error')
         return redirect(url_for('dashboard'))
-    
+
     # Get job queue (connects to Redis directly)
     job_queue = get_job_queue(config.REDIS_URL)
     if not job_queue:
@@ -128,10 +129,10 @@ def submit():
         return redirect(url_for('dashboard'))
 
     job_id = str(uuid.uuid4())
-    job = Job(job_id=job_id, 
-                user_id=user_id, 
+    job = Job(job_id=job_id,
+                user_id=user_id,
                 username=f'User-{user_id[:8]}',
-                prompt=user_input, 
+                prompt=user_input,
                 status=JobStatus.PENDING,
                 created_at=datetime.now(),
                 started_at=datetime.now())
@@ -139,9 +140,8 @@ def submit():
     # This will create a DB document to be stored on GCP Firestore
     firestore_jobs_db.create_job(job)
 
-
     # This will add the job to queue for processing the prompt in the Redis Caching System
-    job_queue.add_job(user_id, f'User-{user_id[:8]}', user_input, job_id)
+    job_queue.add_job(user_id, f'User-{user_id[:8]}', user_input, job_id, model=model)
     
     response = make_response(redirect(url_for('job_status', job_id=job_id)))
     set_user_cookie(response, user_id)
