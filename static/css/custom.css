@@ -66,6 +66,65 @@
     opacity: 0.7;
 }
 
+
+/* Material Design 3 switch */
+.md-switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 32px;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+}
+.md-switch__track {
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    border: 2px solid #79747e;
+    background: transparent;
+    box-sizing: border-box;
+    transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.md-switch--on .md-switch__track {
+    background: #60a5fa;
+    border-color: #60a5fa;
+}
+.md-switch__thumb {
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #79747e;
+    transition: left 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                width 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.md-switch--on .md-switch__thumb {
+    left: 26px;
+    width: 24px;
+    height: 24px;
+    background: #fff;
+}
+
+/* Mode badge on results page */
+.mode-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 2px 10px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    color: #6b7280;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+}
+.mode-badge.react { border-color: #dc2626; color: #dc2626; }
+
 /* Custom scrollbar for results */
 .custom-scrollbar::-webkit-scrollbar {
     width: 8px;
@@ -82,4 +141,36 @@
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
-} 
+}
+
+/* Markdown prose rendering in LLM response */
+#llmContentRendered h1, #llmContentRendered h2, #llmContentRendered h3 {
+    font-weight: 600;
+    margin: 0.75em 0 0.25em;
+}
+#llmContentRendered p { margin: 0.5em 0; }
+#llmContentRendered ul, #llmContentRendered ol {
+    padding-left: 1.5em;
+    margin: 0.5em 0;
+}
+#llmContentRendered ul { list-style-type: disc; }
+#llmContentRendered ol { list-style-type: decimal; }
+#llmContentRendered li { margin: 0.25em 0; }
+#llmContentRendered strong { font-weight: 700; }
+#llmContentRendered em { font-style: italic; }
+#llmContentRendered pre {
+    background: #1e3a5f;
+    color: #bfdbfe;
+    padding: 0.75em 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+    font-size: 0.8rem;
+}
+#llmContentRendered code:not(pre code) {
+    background: #dbeafe;
+    color: #1e40af;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.85em;
+}

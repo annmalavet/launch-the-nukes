@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from google.cloud import firestore
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Setting up an enumeration to status keyword in the system for generalization purpose
 class JobStatus(Enum):
@@ -120,6 +120,92 @@ class FirestoreJobStore:
         q = (self.col.where("user_id", "==", user_id)
                    .order_by("created_at", direction=firestore.Query.DESCENDING))
         return [self._doc_to_job(s) for s in q.stream()]
+
+@dataclass
+class ReactSession:
+    session_id: str
+    user_id: str
+    messages: List[Dict[str, Any]] = field(default_factory=list)
+    job_ids: List[str] = field(default_factory=list)
+    turns_used: int = 0
+    max_turns: int = 5
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class ReactSessionStore:
+    def __init__(self, project_id: str):
+        self.db = firestore.Client(project=project_id)
+        self.col = self.db.collection("react_sessions")
+
+    def create_session(self, session: ReactSession) -> None:
+        self.col.document(session.session_id).set({
+            "user_id": session.user_id,
+            "messages": session.messages,
+            "job_ids": session.job_ids,
+            "turns_used": session.turns_used,
+            "max_turns": session.max_turns,
+            "created_at": session.created_at or datetime.now(),
+            "updated_at": session.updated_at or datetime.now(),
+        })
+
+    def get_session(self, session_id: str) -> Optional[ReactSession]:
+        doc = self.col.document(session_id).get()
+        if not doc.exists:
+            return None
+        d = doc.to_dict()
+        return ReactSession(
+            session_id=doc.id,
+            user_id=d["user_id"],
+            messages=d.get("messages", []),
+            job_ids=d.get("job_ids", []),
+            turns_used=d.get("turns_used", 0),
+            max_turns=d.get("max_turns", 5),
+            created_at=d.get("created_at"),
+            updated_at=d.get("updated_at"),
+        )
+
+    def append_turn(self, session_id: str, new_messages: List[Dict], job_id: str) -> None:
+        doc_ref = self.col.document(session_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return
+        d = doc.to_dict()
+        messages = d.get("messages", []) + new_messages
+        job_ids = d.get("job_ids", [])
+        if job_id not in job_ids:
+            job_ids.append(job_id)
+        doc_ref.update({
+            "messages": messages,
+            "job_ids": job_ids,
+            "turns_used": d.get("turns_used", 0) + 1,
+            "updated_at": datetime.now(),
+        })
+
+    def clear_session(self, session_id: str) -> None:
+        self.col.document(session_id).update({
+            "messages": [],
+            "job_ids": [],
+            "turns_used": 0,
+            "updated_at": datetime.now(),
+        })
+
+    def list_sessions_for_user(self, user_id: str) -> List[ReactSession]:
+        results = []
+        for doc in self.col.where("user_id", "==", user_id).stream():
+            d = doc.to_dict()
+            results.append(ReactSession(
+                session_id=doc.id,
+                user_id=d["user_id"],
+                messages=d.get("messages", []),
+                job_ids=d.get("job_ids", []),
+                turns_used=d.get("turns_used", 0),
+                max_turns=d.get("max_turns", 5),
+                created_at=d.get("created_at"),
+                updated_at=d.get("updated_at"),
+            ))
+        return sorted(results, key=lambda s: s.updated_at or datetime.min, reverse=True)
+
 
 class FirestoreMCPStore:
     def __init__(self, project_id: str):

@@ -8,10 +8,17 @@
     <div class="bg-white shadow rounded-lg p-6 mb-8">
         <div class="flex items-center justify-between">
             <div>
-                <h1 class="text-2xl font-bold text-gray-900">Analysis Results</h1>
+                <div class="flex items-center gap-3 mb-1">
+                    <h1 class="text-2xl font-bold text-gray-900">Analysis Results</h1>
+                    {% if react_mode %}
+                    <span class="mode-badge react">ReAct Mode</span>
+                    {% else %}
+                    <span class="mode-badge">One Shot</span>
+                    {% endif %}
+                </div>
                 <p class="text-gray-600">Prompt analysis completed for {{ username }}</p>
             </div>
-            <a href="{{ url_for('dashboard') }}" 
+            <a href="{{ url_for('dashboard') }}"
                class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
                 <svg class="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
@@ -21,49 +28,94 @@
         </div>
     </div>
 
-    <!-- Original Prompt -->
+    <!-- Launch verdict banner -->
+    {% if used_servers %}
+    <div class="rounded-lg p-5 mb-6 bg-red-600 text-white flex items-center gap-4 shadow-lg">
+        <span class="text-4xl">🚀</span>
+        <div>
+            <p class="text-lg font-bold">The nukes were launched.</p>
+            <p class="text-sm opacity-90">The LLM triggered {{ used_servers | length }} dangerous server{{ 's' if used_servers | length != 1 }}.</p>
+        </div>
+    </div>
+    {% else %}
+    <div class="rounded-lg p-5 mb-6 bg-green-600 text-white flex items-center gap-4 shadow-lg">
+        <span class="text-4xl">🛡️</span>
+        <div>
+            <p class="text-lg font-bold">No nukes launched.</p>
+            <p class="text-sm opacity-90">The LLM did not trigger any dangerous servers.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Conversation history (includes current turn) -->
+    {% if prior_turns %}
     <div class="bg-white shadow rounded-lg p-6 mb-6">
-        <h2 class="text-lg font-medium text-gray-900 mb-4">Original Prompt</h2>
+        <h2 class="text-lg font-medium text-gray-900 mb-4">Conversation History</h2>
+        <div class="space-y-4">
+            {% for turn in prior_turns %}
+            <div class="border-l-4 border-gray-200 pl-4">
+                <p class="text-xs font-medium text-gray-500 mb-1">You</p>
+                <p class="text-sm text-gray-800 whitespace-pre-wrap mb-2">{{ turn.user }}</p>
+                {% if turn.assistant %}
+                <p class="text-xs font-medium text-blue-500 mb-1">LLM <span class="font-mono text-blue-400">{{ model | default('llama3.2') }}</span></p>
+                <p class="text-sm text-blue-800 whitespace-pre-wrap">{{ turn.assistant }}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <!-- One-shot: show the prompt -->
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-medium text-gray-900 mb-4">Prompt</h2>
         <div class="bg-gray-50 rounded-md p-4">
             <p class="text-gray-800 whitespace-pre-wrap">{{ prompt }}</p>
         </div>
     </div>
-
-    <!-- LLM Message -->
-    {% if llm_message %}
-      <div class="bg-blue-50 border border-blue-200 rounded-md p-4 mb-6">
-        <div class="flex">
-          <div class="flex-shrink-0">
-            <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-8 4a1 1 0 100-2 1 1 0 000 2zm-1-7a1 1 0 012 0v3a1 1 0 01-2 0V7z" clip-rule="evenodd" />
-            </svg>
-          </div>
-          <div class="ml-3">
-            <h3 class="text-sm font-medium text-blue-800">
-              LLM Message
-            </h3>
-            <div class="mt-2 text-sm text-blue-700">
-              <p>{{ llm_message }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
     {% endif %}
 
-    <!-- LLM Content -->
+    <!-- LLM Response -->
     {% if llm_content %}
     <div class="bg-white shadow rounded-lg p-6 mb-6">
-        <h2 class="text-lg font-medium text-gray-900 mb-4">LLM Response Content</h2>
-        <div class="bg-blue-50 rounded-md p-4 border">
-            <p class="text-sm text-blue-900 whitespace-pre-wrap">{{ llm_content }}</p>
-        </div>
+        <h2 class="text-lg font-medium text-gray-900 mb-4">LLM Response <span class="text-sm font-mono font-normal text-gray-400">{{ model | default('llama3.2') }}</span></h2>
+        <div class="bg-blue-50 rounded-md p-4 border mb-4 prose prose-sm max-w-none text-blue-900" id="llmContentRendered">{{ llm_content }}</div>
+
+        {% if react_mode %}
+            {% if (react_turn_count | default(1)) < 5 %}
+            <form method="POST" action="{{ url_for('submit') }}" class="space-y-3 border-t border-blue-100 pt-4">
+                <input type="hidden" name="react_mode" value="true">
+                <input type="hidden" name="previous_job_id" value="{{ job_id }}">
+                <input type="hidden" name="react_turn_count" value="{{ react_turn_count | default(1) }}">
+                <input type="hidden" name="model" value="{{ model | default('llama3.2') }}">
+                <label class="block text-sm font-medium text-gray-700">Continue (turn {{ (react_turn_count | default(1)) + 1 }} / 5)</label>
+                <textarea
+                    name="user_input"
+                    rows="2"
+                    required
+                    placeholder="Enter your next prompt..."
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                ></textarea>
+                <button type="submit"
+                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 transition-colors">
+                    Send
+                </button>
+            </form>
+            {% else %}
+            <div class="border-t border-blue-100 pt-4 flex items-center gap-2 text-sm text-gray-500">
+                <svg class="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+                ReAct conversation complete (5 / 5 turns used).
+            </div>
+            {% endif %}
+        {% endif %}
     </div>
     {% endif %}
 
     <!-- LLM Tool Calls -->
     {% if llm_tool_calls %}
     <div class="bg-white shadow rounded-lg p-6 mb-6">
-        <h2 class="text-lg font-medium text-gray-900 mb-4">LLM Tool Calls</h2>
+        <h2 class="text-lg font-medium text-gray-900 mb-4">LLM Tool Calls <span class="text-sm font-mono font-normal text-gray-400">{{ model | default('llama3.2') }}</span></h2>
         <div class="bg-purple-50 rounded-md p-4 border">
             <pre class="text-sm text-purple-900 whitespace-pre-wrap font-mono overflow-x-auto">{{ llm_tool_calls|tojson(indent=2) }}</pre>
         </div>
@@ -123,20 +175,13 @@
         </div>
     {% endif %}
 
-    <!-- Game-like MCP Summary -->
-    <!-- <div class="bg-yellow-50 border border-yellow-300 rounded-lg p-6 mb-6 flex items-center justify-center">
-        <span class="text-lg font-semibold text-yellow-900">
-            🎮 You triggered <span class="text-red-600">{{ num_servers_triggered }}</span> out of <span class="text-blue-700">{{ total_mcps }}</span> dangerous MCPs!
-        </span>
-    </div> -->
-
     <!-- Action Buttons -->
-    <div class="mt-8 flex justify-center space-x-4">
-        <a href="{{ url_for('dashboard') }}" 
-           class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
-            Submit Another Prompt
+    <div class="mt-4 flex justify-center space-x-4">
+        <a href="{{ url_for('dashboard') }}"
+           class="inline-flex items-center px-6 py-3 border border-gray-300 shadow-sm text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+            Back to Dashboard
         </a>
-        <button onclick="window.print()" 
+        <button onclick="window.print()"
                 class="inline-flex items-center px-6 py-3 border border-gray-300 shadow-sm text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
             <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
@@ -145,4 +190,29 @@
         </button>
     </div>
 </div>
-{% endblock %} 
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    const llmEl = document.getElementById('llmContentRendered');
+    if (llmEl) {
+        llmEl.innerHTML = marked.parse(llmEl.textContent);
+    }
+
+    const accordionToggles = document.querySelectorAll('.accordion-toggle');
+    accordionToggles.forEach(toggle => {
+        toggle.addEventListener('click', function() {
+            const content = document.getElementById(this.getAttribute('data-target'));
+            const arrow = this.querySelector('.accordion-arrow');
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                arrow.style.transform = 'rotate(180deg)';
+            } else {
+                content.classList.add('hidden');
+                arrow.style.transform = 'rotate(0deg)';
+            }
+        });
+    });
+</script>
+{% endblock %}

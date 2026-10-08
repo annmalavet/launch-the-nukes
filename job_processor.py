@@ -51,6 +51,9 @@ class Job:
     # Storing the queue position in Redis to process on a FIFO basis
     queue_position: int = 0
     model: str = "llama3.2"
+    react_mode: bool = False
+    prior_messages: list = None
+    react_turn_count: int = 0
 
     def to_dict(self):
         return {
@@ -67,7 +70,10 @@ class Job:
             'progress': self.progress,
             'progress_message': self.progress_message,
             'queue_position': self.queue_position,
-            'model': self.model
+            'model': self.model,
+            'react_mode': self.react_mode,
+            'prior_messages': self.prior_messages or [],
+            'react_turn_count': self.react_turn_count
         }
 
     """
@@ -92,7 +98,10 @@ class Job:
             progress=data.get('progress', 0),
             progress_message=data.get('progress_message', 'Queued'),
             queue_position=data.get('queue_position', 0),
-            model=data.get('model', 'llama3.2')
+            model=data.get('model', 'llama3.2'),
+            react_mode=data.get('react_mode', False),
+            prior_messages=data.get('prior_messages', []),
+            react_turn_count=data.get('react_turn_count', 0)
         )
 
 class RedisJobQueue:
@@ -109,7 +118,7 @@ class RedisJobQueue:
     """
     Adding the job to the Redis Queue
     """    
-    def add_job(self, user_id: str, username: str, prompt: str, job_id: str, model: str = "llama3.2") -> None:
+    def add_job(self, user_id: str, username: str, prompt: str, job_id: str, model: str = "llama3.2", react_mode: bool = False, prior_messages: list = None, react_turn_count: int = 0) -> None:
         job = Job(
             job_id=job_id,
             user_id=user_id,
@@ -117,7 +126,10 @@ class RedisJobQueue:
             prompt=prompt,
             status=JobStatus.PENDING,
             created_at=datetime.now(),
-            model=model
+            model=model,
+            react_mode=react_mode,
+            prior_messages=prior_messages or [],
+            react_turn_count=react_turn_count
         )
         
         # Store job data
@@ -297,7 +309,49 @@ class LLMProcessor:
             print(f"   URL: {ollama_url}")
             return False
     
-    def process_prompt(self, job_id: str, prompt: str, job_queue, user_id: str, model: str = "llama3.2") -> Dict[str, Any]:
+    def _execute_tool_calls(self, tool_calls: list, tool_to_server_map: dict, tools_by_server: dict) -> tuple:
+        """Execute tool calls and return (used_servers, tool_call_results)."""
+        used_servers = []
+        tool_call_results = []
+        for tool_call in tool_calls:
+            if "function" not in tool_call:
+                continue
+            function_info = tool_call["function"]
+            tool_name = function_info.get("name")
+            args_raw = function_info.get("arguments", {})
+            args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+
+            if tool_name not in tool_to_server_map:
+                continue
+            server_name = tool_to_server_map[tool_name]
+
+            # Convert arg types to match schema
+            for server, tools in tools_by_server.items():
+                if server == server_name:
+                    for tool in tools:
+                        if tool.name == tool_name and tool.inputSchema and 'properties' in tool.inputSchema:
+                            converted = {}
+                            for k, v in args.items():
+                                t = tool.inputSchema['properties'].get(k, {}).get('type', 'string')
+                                try:
+                                    if t == 'number' and isinstance(v, str): converted[k] = float(v)
+                                    elif t == 'integer' and isinstance(v, str): converted[k] = int(v)
+                                    elif t == 'boolean' and isinstance(v, str): converted[k] = v.lower() in ('true', '1', 'yes')
+                                    else: converted[k] = v
+                                except (ValueError, TypeError): converted[k] = v
+                            args = converted
+                            break
+
+            used_servers.append({"server": server_name, "tool": tool_name})
+            try:
+                result = asyncio.run(self.mcp_client.call_tool(server_name, tool_name, args))
+                tool_call_results.append({"tool": tool_name, "result": result})
+            except Exception as e:
+                tool_call_results.append({"tool": tool_name, "result": f"Tool execution failed: {e}"})
+
+        return used_servers, tool_call_results
+
+    def process_prompt(self, job_id: str, prompt: str, job_queue, user_id: str, model: str = "llama3.2", react_mode: bool = False, prior_messages: list = None, react_turn_count: int = 0) -> Dict[str, Any]:
         """Process a prompt with LLM and MCP integration"""
         try:
             # Update progress
@@ -349,164 +403,117 @@ class LLMProcessor:
                     ollama_tools.append(ollama_tool)
             
             job_queue.update_job(job_id, progress=20, progress_message="Calling LLM...")
-            
-            # Prepare messages
-            messages = [
-                {
-                    "role": "system", 
-                    "content": "You are a security analysis assistant. Analyze user prompts and use available tools when appropriate for security operations. Be decisive about tool usage."
-                },
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
-            ]
-            
-            # Call LLM with streaming progress
+
+            # Build message history — continue from prior if provided
+            if prior_messages:
+                messages = list(prior_messages)
+                messages.append({"role": "user", "content": prompt})
+            else:
+                messages = [
+                    {"role": "system", "content": "You are a security analysis assistant. Analyze user prompts and use available tools when appropriate for security operations. Be decisive about tool usage."},
+                    {"role": "user", "content": prompt}
+                ]
+
             llm = OllamaProvider(model=model)
-            
-            # Create progress callback for streaming updates
+
             def progress_callback(progress: int, message: str):
                 job_queue.update_job(job_id, progress=progress, progress_message=message)
-            
-            # Add a small delay to ensure "Calling LLM..." is visible
+
             time.sleep(0.5)
-            
-            response = llm.generate_with_tools_streaming(messages, ollama_tools, progress_callback)
-            
-            # Check if we got a valid response or an error
-            if "Error:" in response.get("content", ""):
-                raise Exception(f"LLM Error: {response.get('content', 'Unknown error')}")
-            
-            job_queue.update_job(job_id, progress=80, progress_message="Processing tool calls...")
-            
-            # Process tool calls
+
             try:
                 available_servers = self.mcp_client.get_available_servers()
             except Exception as e:
                 print(f"Warning: Could not get available servers: {e}")
                 available_servers = {}
-            
+
             total_mcps = len(available_servers)
-            used_servers = []
-            tool_call_results = []
-            llm_message = response.get("content", "No response from LLM")
-            
-            tool_calls = response.get("tool_calls", [])
-            
-            if tool_calls:
-                progress_step = 15 / len(tool_calls)  # 15% range for tool execution (80-95%)
-                current_progress = 80
-                
-                for i, tool_call in enumerate(tool_calls):
-                    try:
-                        job_queue.update_job(
-                            job_id, 
-                            progress=int(current_progress + (i * progress_step)), 
-                            progress_message=f"Executing tool {i+1}/{len(tool_calls)}..."
-                        )
-                        
-                        if "function" in tool_call:
-                            function_info = tool_call["function"]
-                            tool_name = function_info.get("name")
-                            
-                            args_raw = function_info.get("arguments", {})
-                            if isinstance(args_raw, str):
-                                args = json.loads(args_raw)
-                            else:
-                                args = args_raw
-                            
-                            if tool_name in tool_to_server_map:
-                                server_name = tool_to_server_map[tool_name]
-                                
-                                # Type conversion logic
-                                tool_schema = None
-                                for server, tools in tools_by_server.items():
-                                    if server == server_name:
-                                        for tool in tools:
-                                            if tool.name == tool_name:
-                                                tool_schema = tool.inputSchema
-                                                break
-                                
-                                if tool_schema and 'properties' in tool_schema:
-                                    converted_args = {}
-                                    for arg_name, arg_value in args.items():
-                                        if arg_name in tool_schema['properties']:
-                                            expected_type = tool_schema['properties'][arg_name].get('type', 'string')
-                                            
-                                            try:
-                                                if expected_type == 'number' and isinstance(arg_value, str):
-                                                    converted_args[arg_name] = float(arg_value)
-                                                elif expected_type == 'integer' and isinstance(arg_value, str):
-                                                    converted_args[arg_name] = int(arg_value)
-                                                elif expected_type == 'boolean' and isinstance(arg_value, str):
-                                                    converted_args[arg_name] = arg_value.lower() in ('true', '1', 'yes')
-                                                else:
-                                                    converted_args[arg_name] = arg_value
-                                            except (ValueError, TypeError):
-                                                converted_args[arg_name] = arg_value
-                                        else:
-                                            converted_args[arg_name] = arg_value
-                                    args = converted_args
-                                
-                                used_servers.append({"server":server_name, "tool":tool_name})
-                                try:
-                                    result = asyncio.run(self.mcp_client.call_tool(server_name, tool_name, args))
-                                    # Changed the tool_call_results structure that is acceptable in GCP Firestore
-                                    # Tuples are not accepted in Firestore
-                                    tool_call_results.append({
-                                        "tool": tool_name,
-                                        "result": result
-                                    })
-                                except Exception as tool_error:
-                                    error_msg = f"Tool execution failed: {str(tool_error)}"
-                                    print(f"Error calling tool {tool_name}: {tool_error}")
-                                    tool_call_results.append({
-                                        "tool": tool_name,
-                                        "result": error_msg
-                                    })
-                            else:
-                                print(f"Tool {tool_name} not found in server mapping")
-                            
-                    except Exception as e:
-                        error_msg = f"Error processing tool call: {str(e)}"
-                        print(f"Error in tool call processing: {e}")
-                        tool_call_results.append({
-                            "tool": tool_call.get("function", {}).get("name", "unknown"),
-                            "result": error_msg
-                        })
-            
+            all_used_servers = []
+            react_turns = []  # stores per-turn data for ReAct mode
+            llm_message = ""
+
+            # Max 5 turns for ReAct mode to prevent runaway loops
+            max_turns = 5 if react_mode else 1
+
+            for turn in range(max_turns):
+                turn_label = f"ReAct turn {turn + 1}/{max_turns}" if react_mode else "Calling LLM"
+                job_queue.update_job(job_id, progress=20 + (turn * 15), progress_message=f"{turn_label}...")
+
+                response = llm.generate_with_tools_streaming(messages, ollama_tools, progress_callback)
+
+                if "Error:" in response.get("content", ""):
+                    raise Exception(f"LLM Error: {response.get('content', 'Unknown error')}")
+
+                tool_calls = response.get("tool_calls", [])
+                llm_message = response.get("content", "No response from LLM")
+
+                turn_used_servers, turn_tool_results = self._execute_tool_calls(
+                    tool_calls, tool_to_server_map, tools_by_server
+                )
+                all_used_servers.extend(turn_used_servers)
+
+                if react_mode:
+                    react_turns.append({
+                        "turn": turn + 1,
+                        "thought": llm_message,
+                        "tool_calls": [tc.get("function", {}).get("name") for tc in tool_calls],
+                        "tool_results": turn_tool_results,
+                    })
+
+                # Always record the assistant reply so message history accumulates across jobs
+                messages.append({"role": "assistant", "content": llm_message})
+
+                # Stop looping if LLM made no tool calls
+                if not tool_calls:
+                    break
+
+                # Feed tool results back into conversation for next turn
+                if react_mode and turn_tool_results:
+                    for tr in turn_tool_results:
+                        messages.append({"role": "tool", "content": tr["result"], "name": tr["tool"]})
+
             job_queue.update_job(job_id, progress=95, progress_message="Finalizing results...")
-            
-            # Prepare final result
-            used_servers = used_servers
-            num_servers_triggered = len(used_servers)
-            risk_level = 'HIGH' if used_servers else 'SAFE'
-            risk_color = 'red' if used_servers else 'green'
-            
+
+            num_servers_triggered = len(all_used_servers)
+            risk_level = 'HIGH' if all_used_servers else 'SAFE'
+            risk_color = 'red' if all_used_servers else 'green'
+
+            # Build full conversation display including the current turn
+            prior_turns = []
+            i = 0
+            msg_list = prior_messages or []
+            while i < len(msg_list):
+                if msg_list[i]['role'] == 'user':
+                    user_msg = msg_list[i]['content']
+                    asst_msg = msg_list[i+1]['content'] if i+1 < len(msg_list) and msg_list[i+1]['role'] == 'assistant' else ''
+                    prior_turns.append({'user': user_msg, 'assistant': asst_msg})
+                i += 1
+            prior_turns.append({'user': prompt, 'assistant': llm_message})
+
             result = {
                 'prompt': prompt,
                 'risk_level': risk_level,
                 'risk_color': risk_color,
                 'total_mcps': total_mcps,
-                'used_servers': used_servers,
+                'used_servers': all_used_servers,
                 'num_servers_triggered': num_servers_triggered,
                 'llm_message': llm_message,
                 'llm_content': response.get("content", ""),
                 'llm_tool_calls': response.get("tool_calls", []),
-                'tool_call_results': tool_call_results,
-                'analysis': llm_message
-            }            
+                'tool_call_results': [tr for t in (react_turns or [{"tool_results": []}]) for tr in t["tool_results"]] if react_mode else [],
+                'analysis': llm_message,
+                'react_mode': react_mode,
+                'react_turns': react_turns,
+                'messages': messages,
+                'react_turn_count': react_turn_count,
+                'prior_turns': prior_turns,
+                'model': model,
+            }
 
-            # Updated the Redis Queue - this will be removed in further commits when the DB structure has been thoroughly tested
             job_queue.update_job(job_id, progress=100, progress_message="Completed")
-            
-            # Updated the firestore with final results of the prompt to be stored in the database
             firestore_jobs_db.update_job(job_id, progress=100, progress_message="Completed", result=result, completed_at=datetime.now())
-            
-            # Updated the triggered MCP server collection with used servers for that specific user id
-            firestore_mcp_db.update_mcp_triggered(user_id, used_servers)
-            
+            firestore_mcp_db.update_mcp_triggered(user_id, all_used_servers)
+
             return result
             
         except Exception as e:
@@ -561,7 +568,7 @@ def worker_process(redis_url: str):
                     
                     # Process the job
                     print("user_id", user_id)
-                    result = processor.process_prompt(job_id, job.prompt, job_queue, user_id, job.model)
+                    result = processor.process_prompt(job_id, job.prompt, job_queue, user_id, job.model, job.react_mode, job.prior_messages, job.react_turn_count)
                     
                     # Update job with result
                     job_queue.update_job(

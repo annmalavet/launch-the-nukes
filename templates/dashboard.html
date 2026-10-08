@@ -97,15 +97,27 @@
             </div>
 
             <div class="flex items-center justify-between">
-                <button 
-                    type="submit" 
-                    id="submitBtn"
-                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
-                >
-                    <span id="submitText">Analyze Prompt</span>
-                    <span id="loadingSpinner" class="loading ml-2 hidden"></span>
-                </button>
-                
+                <div class="flex items-center gap-4">
+                    <button
+                        type="submit"
+                        id="submitBtn"
+                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+                    >
+                        <span id="submitText">Analyze Prompt</span>
+                        <span id="loadingSpinner" class="loading ml-2 hidden"></span>
+                    </button>
+
+                    <div class="flex items-center gap-3">
+                        <div class="md-switch" id="reactModeSwitch" role="switch" aria-checked="false">
+                            <span class="md-switch__track">
+                                <span class="md-switch__thumb"></span>
+                            </span>
+                        </div>
+                        <span class="text-sm font-medium text-gray-600" id="reactModeLabel">One Shot</span>
+                        <input type="hidden" name="react_mode" id="reactModeValue" value="false">
+                    </div>
+                </div>
+
                 <div class="text-sm text-gray-500">
                     <span id="charCount">0</span> characters
                 </div>
@@ -234,6 +246,17 @@
         submitBtn.disabled = true;
         submitText.textContent = 'Analyzing...';
         loadingSpinner.classList.remove('hidden');
+    });
+
+    // ReAct toggle
+    const reactSwitch = document.getElementById('reactModeSwitch');
+    const reactValue = document.getElementById('reactModeValue');
+    const reactLabel = document.getElementById('reactModeLabel');
+    reactSwitch.addEventListener('click', function() {
+        const isOn = this.classList.toggle('md-switch--on');
+        this.setAttribute('aria-checked', isOn);
+        reactValue.value = isOn ? 'true' : 'false';
+        reactLabel.textContent = isOn ? 'ReAct Mode' : 'One Shot';
     });
 
     // Accordion functionality

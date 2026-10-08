@@ -47,13 +47,9 @@
                     </a>
                 </div>
                 <div class="flex items-center space-x-4">
-                    {% if session.username %}
-                        <span class="text-gray-300">Welcome, {{ session.username }}</span>
-                    {% else %}
-                        <a href="{{ url_for('my_jobs') }}" class="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-md text-sm font-medium transition-colors">
-                            My Jobs
-                        </a>
-                    {% endif %}
+                    <a href="{{ url_for('my_jobs') }}" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                        My Jobs
+                    </a>
                 </div>
             </div>
         </div>
